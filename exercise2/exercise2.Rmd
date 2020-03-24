@@ -1,0 +1,62 @@
+---
+title: "exercise2"
+author: "Lee Rui(BA19008042)"
+date: "2020/3/24"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### clean the current workspace
+```{r}
+rm(list = ls())
+```
+
+### read data
+```{r}
+mydata <- read.csv("/cloud/project/ecology/exercise2/xy.csv") 
+head(mydata)
+```
+
+### check what relationship between x and y by scatter plot
+```{r}
+plot(mydata$y ~ mydata$x, data = mydata, main="y ~ x")
+```
+
+### check whether there are outliers
+```{r}
+par(mfrow=c(1, 2)) # set outplay of figure pannel 
+boxplot(mydata$x, main="x", sub=paste("Outlier rows: ", boxplot.stats(mydata$x)$out)) 
+boxplot(mydata$y, main="y", sub=paste("Outlier rows: ", boxplot.stats(mydata$y)$out))
+
+```
+
+### check whether data meet normal distribution
+```{r}
+library(e1071) 
+par(mfrow=c(1, 2)) 
+plot(density(mydata$x), main="Density Plot: x", ylab="Frequency", sub=paste("Skewness:", round(e1071::skewness(mydata$x), 2))) 
+polygon(density(mydata$x), col="red") 
+plot(density(mydata$y), main="Density Plot: y", ylab="Frequency", sub=paste("Skewness:", round(e1071::skewness(cars$dist), 2))) 
+polygon(density(mydata$y), col="red")
+```
+
+### calculate coefficient 
+```{r}
+cor(mydata$x, mydata$y)
+```
+
+### build a linear model
+```{r}
+linearMod <- lm(y ~ x, data= mydata) 
+print(linearMod)
+```
+
+### check of statistic significance
+```{r}
+summary(linearMod)
+```
+
+
