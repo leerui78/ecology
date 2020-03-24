@@ -1,0 +1,46 @@
+---
+title: "exercise1"
+author: "Lee Rui(BA19008042)"
+date: "2020/3/24"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+rm(list = ls())
+
+```
+cleaning the current environment
+```{r}
+library(ade4)
+data(package = "ade4") 
+data("doubs") 
+str(doubs) 
+```
+```{r}
+mydata <- doubs$env 
+head(mydata)
+```
+head() shows the first 6rows 
+```{r}
+mydata <- mydata[,-1] 
+head(mydata)
+```
+mydata[,-1] delete the first columns
+```{r}
+hist(mydata$alt, col = "green", main = "altitude distribution", xlab = "altitude")
+```
+hist  check the distribution of the variable of altitude 
+```{r}
+library(corrplot)
+res1 <- cor(mydata) 
+res1 
+```
+```{r}
+library(psych) 
+pairs.panels(mydata[,2:6])
+```
+corrplot and psych calculate the coeﬃcients of these variables 
