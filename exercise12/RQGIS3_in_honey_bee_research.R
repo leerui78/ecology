@@ -1,0 +1,168 @@
+library("raster")
+library("rgeos")
+library("rgdal")
+library("landscapemetrics") 
+Sys.getenv("GDAL_DATA")
+
+#remotes::install_github("jannes-m/RQGIS3")
+library("RQGIS3")
+qgis_session_info()
+set_env(dev=FALSE)
+open_app()
+
+#加载点数据
+library("tidyverse")
+point_table<-read.csv("E:/RStudio/workspace/ecology/GISBEEBOOK_data/QGIS/points_table.csv")
+str(point_table)
+point_divided<-point_table %>%separate("ID.POINT_X.POINT_Y", into=c("ID","POINT_X", "POINT_Y"),sep=";", convert=TRUE)
+point.sp<-SpatialPoints(coords = point_divided[,c("POINT_X","POINT_Y")])
+point.sp
+point.spdf<-SpatialPointsDataFrame(point_divided[,c("POINT_X","POINT_Y")],data = point_divided[,2:3])
+point.spdf
+crs(point.sp)
+mycrs<-CRS(projargs="+proj=somerc +lat_0=46.9524055555556 +lon_0=7.43958333333333 +k_0=1 +x_0=600000 +y_0=200000 +ellps=bessel +towgs84=674.374,15.056,405.346,0,0,0,0 +units=m +no_defs",doCheckCRSArgs=TRUE, SRS_string="EPSG:21781")
+proj4string(point.spdf)<-mycrs
+point.spdf
+writeOGR(point.spdf,"exercise12","point_spdf",driver = "ESRI Shapefile",overwrite = TRUE)
+
+#加载栅格数据并重投影
+g100_06<-raster("g100_06/g100_06.tif")
+find_algorithms(search_term = "Warp")
+#get_usage(alg = "gdal:warpreproject")
+#get_args_man(alg = "gdal:warpreproject", options = TRUE)
+#run_qgis(alg = "gdal:warpreproject", INPUT = g100_06, SOURCE_CRS = "EPSG: 21781", TARGET_CRS= "EPSG: 21781",OUTPUT="exercise12/g100_06_chcrs.tif")#R中耗时很长，直接使用保存后的写rmd
+g100_06_chCRS<-raster("exercise12/g100_06_chcrs.tif")
+
+#加载矢量数据
+commune_boundary_FR<-readOGR('GISBEEBOOK_data/QGIS/commune_boundary_FR.shp')
+point<-readOGR("exercise12/point_spdf.shp")
+
+#clip and mask
+projection(g100_06_chCRS)
+projection(point)
+projection(commune_boundary_FR)
+
+point_transCRS<-spTransform(point,crs(g100_06_chCRS))
+commune_boundary_FR_transCRS<-spTransform(commune_boundary_FR,crs(g100_06_chCRS))
+
+projection(g100_06_chCRS)
+projection(commune_boundary_FR_transCRS)
+projection(point_transCRS)
+
+extent(point_transCRS)
+extent(g100_06_chCRS)
+extent(commune_boundary_FR_transCRS)
+
+CLC06_Fribourg<-crop(g100_06_chCRS,commune_boundary_FR_transCRS)
+CLC06_Fribourg_maskedch<-mask(CLC06_Fribourg,commune_boundary_FR_transCRS,updateNA=TRUE)
+writeRaster(CLC06_Fribourg_maskedch,"exercise12/CLC06_Fribourg_masked.tif",overwrite = TRUE)
+
+#Add buffer
+#raster::extract(CLC06_Fribourg_maskedch,point_transCRS,buffer=2000)
+find_algorithms(search_term = "Buffer", name_only = TRUE)
+#get_usage(alg = "native:buffer")
+#get_args_man(alg = "native:buffer", options = TRUE)
+run_qgis(alg = "native:buffer", INPUT = point_transCRS, DISTANCE = 2000, OUTPUT= "exercise12/buffered.shp")#此处重复输出会报错
+buffer<-readOGR("exercise12/buffered.shp")
+
+#visaulization buffer(2000 meters)
+plot(CLC06_Fribourg_maskedch)
+plot(point_transCRS,type = "o", col = "black",add=TRUE)
+plot(buffer,type = "o",col = rgb(0, 0, 255, 80, maxColorValue=255),add=TRUE)
+
+#calculating proportion
+POint_buffer<-as(buffer,"SpatialPolygons")
+startc=c()
+for (i in 1:20){
+  POint_bufferm<-mask(CLC06_Fribourg,POint_buffer[i],updateNA=TRUE)
+  POint_buffermv<-values(POint_bufferm)
+  class12<-sum(POint_buffermv==12,na.rm=TRUE)/(length(POint_buffermv)-sum(is.na(POint_buffermv)))
+  class24<-sum(POint_buffermv==24,na.rm=TRUE)/(length(POint_buffermv)-sum(is.na(POint_buffermv)))
+  class25<-sum(POint_buffermv==25,na.rm=TRUE)/(length(POint_buffermv)-sum(is.na(POint_buffermv)))
+  classother<-1-class12-class24-class25
+  startc<-append(startc,c(class12,class24,class25,classother))
+}
+Land_proportion<-data.frame(t(matrix(c(startc),nrow=4)))
+
+#add lable
+legend<-read.delim("g100_06/clc_legend_qgis.txt",skip=1)
+str(legend)
+clc_legend<-separate(legend,"INTERPOLATION.DISCRETE",into = c("GRID_CODE","b","c","d","e","f"),sep = ",")%>%unite(RGB, c(b, c, d, e), sep = ",", remove = TRUE)%>%separate("f",into = c("CLC_CODE","LABEL"),sep = " - ")
+clc_legend
+names(Land_proportion)<-c(gsub("-", "_", gsub(" ", "_", clc_legend[which(clc_legend == 12, arr.ind=TRUE)[1],4])),gsub(" ", "_", clc_legend[which(clc_legend == 24, arr.ind=TRUE)[1],4]),gsub(" ", "_", clc_legend[which(clc_legend == 25, arr.ind=TRUE)[1],4]),"Others")
+
+#visaulization the Land_proportion of points
+Landcoor_proportion<-cbind(point_divided,Land_proportion)
+Landcoor_proportion#R读入读出数据坐标偏差导致计算比例有些许偏差
+#write.csv(Landcoor_proportion,"exercise12/Landcoor_proportion.csv")
+
+boundary_df<-fortify(commune_boundary_FR_transCRS)
+prov_coor<-cbind(boundary_df[which(boundary_df == 15, arr.ind=TRUE)[1:51,1],1:2],commune_boundary_FR_transCRS$GEMNAME)
+prov_coor
+le<-data.frame(c(589200,589200,589200,589200),c(173000,172000,171000,170000),c("Non-irrigated arable land","Coniferous forest","Mixed forest","Other over land"))#add legend
+library("ggplot2")
+ggplot()+geom_polygon(aes(x=long, y=lat, group=group), data=boundary_df, fill=cm.colors(2640:2640), colour="grey60")+
+  geom_text(aes(x=long+1000, y=lat,label=paste(commune_boundary_FR_transCRS$GEMNAME)),col=terrain.colors(10)[9],size = 2,check_overlap = TRUE,data=prov_coor)+#rmd doesn't want to show it
+  theme(panel.grid = element_blank(), axis.title = element_blank())+
+  geom_point(aes(x=POINT_X, y=POINT_Y),alpha=0.2,colour=terrain.colors(10)[7],size = 30,data=point_divided)+
+  geom_text(aes(x=POINT_X+800, y=POINT_Y+600, label=paste(ID)), data=point_divided)+
+  geom_errorbar(aes(x=POINT_X, ymin=POINT_Y, ymax=POINT_Y+Non_irrigated_arable_land*1000), data=Landcoor_proportion,size=5,color="#ffffa8", width=0)+
+  geom_errorbar(aes(x=POINT_X, ymin=POINT_Y+Non_irrigated_arable_land*1000, ymax=POINT_Y+Non_irrigated_arable_land*1000+Coniferous_forest*1000), data=Landcoor_proportion, size=5, color="#00a600", width=0)+
+  geom_errorbar(aes(x=POINT_X, ymin=POINT_Y+Non_irrigated_arable_land*1000+Coniferous_forest*1000, ymax=POINT_Y+Non_irrigated_arable_land*1000+Coniferous_forest*1000+Mixed_forest*1000), data=Landcoor_proportion, size=5, color="#4dff00", width=0)+
+  geom_errorbar(aes(x=POINT_X, ymin=POINT_Y+Non_irrigated_arable_land*1000+Coniferous_forest*1000+Mixed_forest*1000, ymax=POINT_Y+Non_irrigated_arable_land*1000+Coniferous_forest*1000+Mixed_forest*1000+Others*1000), data=Landcoor_proportion, size=5, color="#ffffff", width=0)+
+  ggtitle('Forested land cover percentages surrounding honey bee colonies')+
+  geom_text(aes(x=589600, y=175000,label=paste("Legend")),size=4)+
+  geom_point(aes(x=le[,1],y=le[,2]),shape=15,colour=c("#ffffa8","#00a600","#4dff00","#ffffff"),size = 4,data=le)+
+  geom_text(aes(x=le[,1]+2600, y=le[,2], label=paste(le[,3])), data= le)
+
+##以下为随意猜测的建模
+#preProcess data for model
+Land_proportion$Major_land_types<-apply(Land_proportion, 1, function(x){which.max(x)})
+Land_proportion<-Land_proportion%>%mutate(Major_land_types = case_when(Major_land_types == 1 ~ 'Non_irrigated_arable_land',Major_land_types == 2 ~ 'Coniferous_forest',Major_land_types == 3 ~ 'Mixed_forest',Major_land_types == 4 ~ 'Others'))
+Land_coor_types<-cbind(point_divided[,2:3],Land_proportion[5])
+Land_coor_types
+
+#build rf model
+library("caret")
+set.seed(521)
+train_idx <- createDataPartition(Land_coor_types$Major_land_types, p=0.75, list=FALSE)
+training <- Land_coor_types[train_idx,]
+test <- Land_coor_types[-train_idx,]
+
+set.seed(521)
+uneLength_ctrl <- trainControl(
+  method = 'cv',                  
+  number = 10,                     
+  savePredictions = 'final',
+  classProbs = T,                  
+  summaryFunction=twoClassSummary) 
+
+rf_fit <- train(as.factor(Major_land_types) ~.,
+                data = training, 
+                method = "rf", 
+                trControl = uneLength_ctrl,
+                verbose = FALSE)
+
+#evaluate rf performance
+rf_pred <- predict(rf_fit, test)
+rf_pred
+confusionMatrix(reference = as.factor(test$Major_land_types), 
+                data = rf_pred,
+                mode = "everything")
+
+library(MLeval)
+x <- evalm(rf_fit)
+x$roc
+x$stdres
+
+
+
+
+
+
+
+
+
+
+
+
